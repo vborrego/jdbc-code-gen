@@ -103,12 +103,12 @@ public class Main {
         
     }
     
-    private static String generateDTOJavaFile(DatabaseMetaData metaData, String table,String tableFormatted, String outputFolder)  throws SQLException {
+    private static SourceCode generateDTOJavaFile(DatabaseMetaData metaData, String table,String tableFormatted, String outputFolder)  throws SQLException {
         //DTO
         StringBuilder dto = new StringBuilder();                        
         dto.append("import java.util.Date;");
         dto.append("public class " + tableFormatted + " { \n");
-        String getAllBody = createMembersAndGetAllSourceCode(metaData, table, dto);
+        SourceCode sc = createMembersAndGetSourceCode(metaData, table, dto);
         dto.append("} ");
         
         try {
@@ -125,10 +125,10 @@ public class Main {
             e.printStackTrace();
         }
         
-        return getAllBody;
+        return sc;
     }
     
-    private static String generateDAOJavaFile(String tableFormatted,String outputFolder,String getAllBody){
+    private static String generateDAOJavaFile(String tableFormatted,String outputFolder,SourceCode sc){
         // DAO ....
         String daoName = tableFormatted + "DAO";
         StringBuilder dao = new StringBuilder();
@@ -140,12 +140,13 @@ public class Main {
         dao.append(String.format("public class %s {\n", daoName));
         dao.append(" private Connection conn;");
         dao.append(String.format("    public %s(Connection conn){this.conn=conn;} \n", daoName));
-        dao.append(String.format("    public %s[] getAll(){%s} \n", tableFormatted, getAllBody));
+        dao.append(String.format("    public %s[] getAll(){%s} \n", tableFormatted, sc.getGetAll() ));
         // TODO !!!!
-        dao.append(String.format("    public void create(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted));
-        dao.append(String.format("    public %s read(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted, tableFormatted));
-        dao.append(String.format("    public void update(%s obj){ throw new UnsupportedOperationException();} \n", tableFormatted));
-        dao.append(String.format("    public void delete(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted));
+        dao.append(String.format("    public void create(%s obj){ %s } \n", tableFormatted , sc.getCreate() ));
+        
+        dao.append(String.format("    public %s read(%s obj){ %s } \n", tableFormatted, tableFormatted, sc.getRead()));
+        dao.append(String.format("    public void update(%s obj){ %s } \n", tableFormatted, sc.getUpdate()));
+        dao.append(String.format("    public void delete(%s obj){ %s } \n", tableFormatted, sc.getDelete()));
         
         dao.append("} ");
         
@@ -176,8 +177,8 @@ public class Main {
         while (rs.next()) {
             String table = rs.getString("TABLE_NAME");
             String tableFormatted = formatTableName(table);
-            String getAllBody = generateDTOJavaFile(metaData, table, tableFormatted,outputFolder);
-            String daoName = generateDAOJavaFile(tableFormatted,outputFolder,getAllBody);
+            SourceCode sc = generateDTOJavaFile(metaData, table, tableFormatted,outputFolder);
+            String daoName = generateDAOJavaFile(tableFormatted,outputFolder,sc);
             daoNames.add(daoName);            
         }        
         rs.close();
@@ -207,21 +208,102 @@ public class Main {
         return temp;
     }
     
+    private static String convertStringArrayToString(ArrayList<String> list,String separator){
+        StringBuilder fields = new StringBuilder();
+        for(String s:list){
+            fields=fields.append(s);
+            fields=fields.append(separator);
+        }
+        
+        // remove last separator
+        String fieldsx = fields.toString();
+        fieldsx = fieldsx.substring(0,fieldsx.length()-1);        
+        return fieldsx;
+    }
+    
+    private static String repeatValueSeparatedByString(String value,String separator,int numberRepetitions){       
+        StringBuilder fields = new StringBuilder();
+        for(int i=0;i<numberRepetitions;i++){
+            fields=fields.append(value);
+            fields=fields.append(separator);
+        }
+        
+        // remove last separator
+        String fieldsx = fields.toString();
+        fieldsx = fieldsx.substring(0,fieldsx.length()-1);        
+        return fieldsx;
+    }
+    
+    private static String generateCreateMethod(ArrayList<String> columns, ArrayList<String> formcolumns,  ArrayList<Integer> types,String table, String formattedTable){
+        String fields = convertStringArrayToString(columns,",");
+        String values = repeatValueSeparatedByString("?",",",columns.size() );
+        StringBuilder sb = new StringBuilder();
+        
+        sb.append(String.format("ArrayList<%s> list = new ArrayList<%s>(); \n", formattedTable, formattedTable));
+        sb.append("try{ \n");
+        sb.append(String.format("    PreparedStatement ps = conn.prepareStatement(\"INSERT INTO %s (%s) VALUES(%s);\"); \n", table,fields,values));
+        
+        for (int i = 0; i < columns.size(); i++) {
+            String col = columns.get(i);
+            String form = formcolumns.get(i);
+            Integer dtype = types.get(i);
+            form = uppercaseFirstLetter(form);
+            int index = i+1;
+            
+            if (dtype == Types.TIMESTAMP) {
+                sb.append(String.format("         ps.setTimestamp(%d, new java.sql.Timestamp( obj.get%s().getTime() ) ) ; \n", index , form ));
+            }
+            else if (dtype == Types.INTEGER || dtype == Types.TINYINT) {
+                sb.append(String.format("         ps.setInt(%d, obj.get%s() ) ; \n", index , form ));
+            }
+            else if (dtype == Types.DATE) {
+                sb.append(String.format("         ps.setDate(%d, new java.sql.Date(obj.get%s().getTime() ) );  \n",index, form));  
+            }
+            else if (dtype == Types.REAL) {
+                sb.append(String.format("         ps.setDouble(%d , obj.get%s()  );  \n", index, form));
+            }
+            else if (dtype == Types.BIT) {
+                sb.append(String.format("         ps.setBoolean(%d , obj.get%s() );  \n", index, form));
+            }
+            else if (dtype == Types.LONGVARBINARY) {
+                sb.append(String.format("         ps.setBytes(%d , obj.get%s()  );  \n", index, form));
+            }
+            else if (dtype == Types.VARCHAR || dtype == Types.LONGVARCHAR || dtype == Types.CHAR) {
+                sb.append(String.format("         ps.setString(%d, obj.get%s()  );  \n", index, form ));
+            }/*
+            else {
+                sb.append(String.format("         objx.set%s(rs.getObject(\"%s\") );  \n",  form, col));
+            }*/
+        }
+        sb.append("        ps.executeUpdate(); \n");
+        sb.append("        ps.close; \n");
+        //sb.append("         list.add(objx);  \n");
+        //sb.append("    }\n");
+        //sb.append("    rs.close(); \n");
+        //sb.append("    conn.close(); \n");
+        sb.append("}catch(Exception ex){   \n");
+        sb.append("    System.out.println(ex.getMessage()); \n");
+        sb.append("} \n");
+        //sb.append(String.format("return list.toArray(new %s[list.size()]) ; \n ", formattedTable, formattedTable));
+        
+        return sb.toString();        
+    }
+    
     /**
-    Creates DTO members and getAll body source code
+    Creates DTO members and body source code for several methods
     */
-    private static String createMembersAndGetAllSourceCode(DatabaseMetaData metaData, String table, StringBuilder dto) throws SQLException {
+    private static SourceCode createMembersAndGetSourceCode(DatabaseMetaData metaData, String table, StringBuilder dto) throws SQLException {
         ResultSet rs = metaData.getColumns(null, null, table, null);
         String formattedTable = Main.formatTableName(table);
         ArrayList<String> columns = new ArrayList<String>();
         ArrayList<String> formcolumns = new ArrayList<String>();
         ArrayList<Integer> types = new ArrayList<Integer>();
+        SourceCode sc = new SourceCode();
         
         while (rs.next()) {
             String column = rs.getString("COLUMN_NAME");
             int dataType = rs.getInt("DATA_TYPE");
             int nullable = rs.getInt("NULLABLE");
-            //rs.getTimestamp(null).getTime()
             String columnFormattedName = underscoreLetterToUpper(column);
             String formattedDataType = getDataType(dataType, nullable);
             
@@ -236,13 +318,13 @@ public class Main {
             formcolumns.add(columnFormattedName);
             types.add(dataType);
         }
+        rs.close();
         
         dto.append( createToStringMethod(formcolumns, types) );
         
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("ArrayList<%s> list = new ArrayList<%s>(); \n", formattedTable, formattedTable));
         sb.append("try{ \n");
-        // sb.append("    Connection conn = ds.getConnection(); \n");
         sb.append(String.format("    PreparedStatement ps = conn.prepareStatement(\"SELECT * FROM %s;\"); \n", table));
         sb.append("    ResultSet rs = ps.executeQuery(); \n");
         sb.append("    while(rs.next()){ \n");
@@ -282,12 +364,18 @@ public class Main {
         sb.append("         list.add(objx);  \n");
         sb.append("    }\n");
         sb.append("    rs.close(); \n");
+        sb.append("    ps.close(); \n");
         //sb.append("    conn.close(); \n");
         sb.append("}catch(Exception ex){   \n");
         sb.append("    System.out.println(ex.getMessage()); \n");
         sb.append("} \n");
         sb.append(String.format("return list.toArray(new %s[list.size()]) ; \n ", formattedTable, formattedTable));
-        return sb.toString();
+        
+        
+        String create = generateCreateMethod(columns, formcolumns, types,table, formattedTable);
+        sc.setGetAll(sb.toString());
+        sc.setCreate(create);
+        return sc;
     }
 
     private static String createToStringMethod(ArrayList<String> formcolumns , ArrayList<Integer> types) {
