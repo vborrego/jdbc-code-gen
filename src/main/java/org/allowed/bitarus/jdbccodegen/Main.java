@@ -66,7 +66,7 @@ public class Main {
         System.out.println(msg);
     }
     
-    private static void generateMainAppJavaFile(String outputFolder){
+    private static void generateMainAppJavaFile(String outputFolder, ArrayList<String> daoNames){
         StringBuilder mainApp = new StringBuilder();
         mainApp.append("import java.sql.DriverManager; \n");
         mainApp.append("import java.sql.Connection; \n");
@@ -75,6 +75,12 @@ public class Main {
         mainApp.append("        try{ \n");
         mainApp.append("            Class.forName(\""+ JDBC_DRIVER +"\"); \n");
         mainApp.append("            Connection conn = DriverManager.getConnection(\"" + JDBC_URL + "\", \"root\", \"12345678\"); \n");
+        
+        for(String daoName:daoNames){
+            mainApp.append(String.format("        System.out.println(\">>> getAll() for %s\");    \n", daoName) );
+            mainApp.append(String.format("        for(Object obj : new %s(conn).getAll() ) { System.out.println(obj.toString());  }  \n", daoName) );                        
+        }
+        
         mainApp.append("        }catch(Exception ex){ \n");
         mainApp.append("            System.out.println(ex.getMessage() ); \n");
         mainApp.append("        } \n");
@@ -122,7 +128,7 @@ public class Main {
         return getAllBody;
     }
     
-    private static void generateDAOJavaFile(String tableFormatted,String outputFolder,String getAllBody){
+    private static String generateDAOJavaFile(String tableFormatted,String outputFolder,String getAllBody){
         // DAO ....
         String daoName = tableFormatted + "DAO";
         StringBuilder dao = new StringBuilder();
@@ -134,11 +140,13 @@ public class Main {
         dao.append(String.format("public class %s {\n", daoName));
         dao.append(" private Connection conn;");
         dao.append(String.format("    public %s(Connection conn){this.conn=conn;} \n", daoName));
+        dao.append(String.format("    public %s[] getAll(){%s} \n", tableFormatted, getAllBody));
+        // TODO !!!!
         dao.append(String.format("    public void create(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted));
         dao.append(String.format("    public %s read(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted, tableFormatted));
         dao.append(String.format("    public void update(%s obj){ throw new UnsupportedOperationException();} \n", tableFormatted));
         dao.append(String.format("    public void delete(%s obj){ throw new UnsupportedOperationException(); } \n", tableFormatted));
-        dao.append(String.format("    public %s[] getAll(){%s} \n", tableFormatted, getAllBody));
+        
         dao.append("} ");
         
         try {           
@@ -153,7 +161,9 @@ public class Main {
         }
         catch (IOException e) {
             e.printStackTrace();
-        }        
+        }
+        
+        return daoName;        
     }
     
     private static void getMetaData(Connection conn,String outputFolder) throws SQLException {
@@ -161,16 +171,18 @@ public class Main {
         String[] types = { "TABLE" };
         ResultSet rs = metaData.getTables(null, null, null, types);
         
-        generateMainAppJavaFile(outputFolder);
+        ArrayList<String> daoNames = new ArrayList<String>(); 
         
         while (rs.next()) {
             String table = rs.getString("TABLE_NAME");
             String tableFormatted = formatTableName(table);
             String getAllBody = generateDTOJavaFile(metaData, table, tableFormatted,outputFolder);
-            generateDAOJavaFile(tableFormatted,outputFolder,getAllBody);            
-        }
-        
+            String daoName = generateDAOJavaFile(tableFormatted,outputFolder,getAllBody);
+            daoNames.add(daoName);            
+        }        
         rs.close();
+        
+        generateMainAppJavaFile(outputFolder,daoNames);
     }
     
     private static String underscoreLetterToUpper(String value) {
@@ -225,6 +237,8 @@ public class Main {
             types.add(dataType);
         }
         
+        dto.append( createToStringMethod(formcolumns, types) );
+        
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("ArrayList<%s> list = new ArrayList<%s>(); \n", formattedTable, formattedTable));
         sb.append("try{ \n");
@@ -275,6 +289,37 @@ public class Main {
         sb.append(String.format("return list.toArray(new %s[list.size()]) ; \n ", formattedTable, formattedTable));
         return sb.toString();
     }
+
+    private static String createToStringMethod(ArrayList<String> formcolumns , ArrayList<Integer> types) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("    public String toString(){" ));
+        
+        StringBuilder pattern=new StringBuilder();
+        StringBuilder fields=new StringBuilder();
+        
+        for (int i = 0; i < formcolumns.size(); i++) {
+            String form = formcolumns.get(i);
+            Integer dtype = types.get(i);
+                        
+            if (dtype == Types.INTEGER || dtype == Types.TINYINT) {
+                pattern.append(String.format(" %s: %%d " , form ));
+                fields.append(String.format("this.%s," , form ));
+            }
+            else if (dtype == Types.VARCHAR || dtype == Types.LONGVARCHAR || dtype == Types.CHAR) {
+                pattern.append(String.format(" %s: %%s " , form ));
+                fields.append(String.format("this.%s," , form ));                
+            }
+        }
+        
+        // remove last ','
+        String fieldsx = fields.toString();
+        fieldsx = fieldsx.substring(0,fieldsx.length()-1);        
+        
+        sb.append(String.format(" return String.format(\"%s\", %s );", pattern.toString() , fieldsx ));
+        sb.append("} \n");
+        return sb.toString();
+    }
+
     
     private static String createGetter(String columnFormattedName, String formattedDataType) {
         String temp = uppercaseFirstLetter(columnFormattedName);
