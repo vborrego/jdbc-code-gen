@@ -35,6 +35,7 @@ public class Main {
     private static String OUTPUT_FOLDER = "/tmp/gen/";
     private static String JDBC_USER="root"; 
     private static String JDBC_PASS="12345678";
+    private static StringUtils su;
     
     private static Properties loadProperties(){
         Properties props = new Properties();
@@ -59,7 +60,7 @@ public class Main {
     public static void main(String[] args) {
         info("jdbcCodeGen on the way");        
         loadProperties();
-        
+        su=new StringUtils();
         info(String.format("JDBC Driver: %s",JDBC_DRIVER)); 
         info(String.format("JDBC URL: %s",JDBC_URL));
         info(String.format("Output folder: %s", OUTPUT_FOLDER)); 
@@ -205,7 +206,7 @@ public class Main {
         
         while (rs.next()) {
             String table = rs.getString("TABLE_NAME");
-            String tableFormatted = formatTableName(table);
+            String tableFormatted = su.formatTableName(table);
             SourceCode sc = generateDTOJavaFile(metaData, table, tableFormatted,outputFolder);
             String daoName = generateDAOJavaFile(tableFormatted,outputFolder,sc);
             daoNames.add(daoName);            
@@ -215,27 +216,6 @@ public class Main {
         generateMainAppJavaFile(outputFolder,daoNames);
 }
 
-private static String underscoreLetterToUpper(String value) {
-    String temp = value;
-    // replaces _a by A ...
-    for (char letter = 'a'; letter <= 'z'; letter++) {
-        String base = new Character(letter).toString();
-        temp = temp.replaceAll("_" + base, base.toUpperCase());
-    }
-    return temp;
-}
-
-private static String uppercaseFirstLetter(String value) {
-    value = value.substring(0, 1).toUpperCase() + value.substring(1);
-    return value;
-}
-
-private static String formatTableName(String table) {
-    // first letter must be Upper
-    String temp = uppercaseFirstLetter(table);
-    temp = underscoreLetterToUpper(temp);
-    return temp;
-}
 
 private static String convertStringArrayToString(ArrayList<String> list,String separator){
     StringBuilder fields = new StringBuilder();
@@ -276,13 +256,13 @@ private static String generateCreateMethod(ArrayList<String> columns, ArrayList<
         String col = columns.get(i);
         String form = formcolumns.get(i);
         Integer dtype = types.get(i);
-        form = uppercaseFirstLetter(form);
+        form = su.uppercaseFirstLetter(form);
         int index = i+1;
         
         if (dtype == Types.TIMESTAMP) {
             sb.append(String.format("         ps.setTimestamp(%d, new java.sql.Timestamp( obj.get%s().getTime() ) ) ; \n", index , form ));
         }
-        else if (dtype == Types.INTEGER || dtype == Types.TINYINT) {
+        else if (dtype == Types.INTEGER || dtype == Types.TINYINT || dtype == Types.SMALLINT ) {
             sb.append(String.format("         ps.setInt(%d, obj.get%s() ) ; \n", index , form ));
         }
         else if (dtype == Types.DATE) {
@@ -299,10 +279,10 @@ private static String generateCreateMethod(ArrayList<String> columns, ArrayList<
         }
         else if (dtype == Types.VARCHAR || dtype == Types.LONGVARCHAR || dtype == Types.CHAR) {
             sb.append(String.format("         ps.setString(%d, obj.get%s()  );  \n", index, form ));
-        }/*
+        }
         else {
             sb.append(String.format("         objx.set%s(rs.getObject(\"%s\") );  \n",  form, col));
-    }*/
+        }
     }
     sb.append("        ps.executeUpdate(); \n");
     sb.append("        ps.close(); \n");
@@ -323,7 +303,7 @@ private static String generateCreateMethod(ArrayList<String> columns, ArrayList<
  */
 private static SourceCode createMembersAndGetSourceCode(DatabaseMetaData metaData, String table, StringBuilder dto) throws SQLException {
     ResultSet rs = metaData.getColumns(null, null, table, null);
-    String formattedTable = Main.formatTableName(table);
+    String formattedTable = su.formatTableName(table);
     ArrayList<String> columns = new ArrayList<String>();
     ArrayList<String> formcolumns = new ArrayList<String>();
     ArrayList<Integer> types = new ArrayList<Integer>();
@@ -333,7 +313,7 @@ private static SourceCode createMembersAndGetSourceCode(DatabaseMetaData metaDat
         String column = rs.getString("COLUMN_NAME");
         int dataType = rs.getInt("DATA_TYPE");
         int nullable = rs.getInt("NULLABLE");
-        String columnFormattedName = underscoreLetterToUpper(column);
+        String columnFormattedName = su.underscoreLetterToUpper(column);
         String formattedDataType = getDataType(dataType, nullable);
         
         String member = String.format("    private %s %s; // is nullable: %d datatype: %d\n", formattedDataType, columnFormattedName, nullable, dataType);
@@ -363,12 +343,12 @@ private static SourceCode createMembersAndGetSourceCode(DatabaseMetaData metaDat
         String col = columns.get(i);
         String form = formcolumns.get(i);
         Integer dtype = types.get(i);
-        form = uppercaseFirstLetter(form);
+        form = su.uppercaseFirstLetter(form);
         
         if (dtype == Types.TIMESTAMP) {
             sb.append(String.format("         if(rs.getTimestamp(\"%s\")!=null ){ objx.set%s( new Date(rs.getTimestamp(\"%s\").getTime() ) ); } \n", col,form, col));
         }
-        else if (dtype == Types.INTEGER || dtype == Types.TINYINT) {
+        else if (dtype == Types.INTEGER || dtype == Types.TINYINT || dtype == Types.SMALLINT) {
             sb.append(String.format("         objx.set%s( rs.getInt(\"%s\")  );  \n", form, col));
         }
         else if (dtype == Types.DATE) {
@@ -418,7 +398,7 @@ private static String createToStringMethod(ArrayList<String> formcolumns , Array
         String form = formcolumns.get(i);
         Integer dtype = types.get(i);
         
-        if (dtype == Types.INTEGER || dtype == Types.TINYINT) {
+        if (dtype == Types.INTEGER || dtype == Types.TINYINT || dtype == Types.SMALLINT) {
             pattern.append(String.format(" %s: %%d " , form ));
             fields.append(String.format("this.%s," , form ));
         }
@@ -439,7 +419,7 @@ private static String createToStringMethod(ArrayList<String> formcolumns , Array
 
 
 private static String createGetter(String columnFormattedName, String formattedDataType) {
-    String temp = uppercaseFirstLetter(columnFormattedName);
+    String temp = su.uppercaseFirstLetter(columnFormattedName);
     String methodName = "get" + temp;
     StringBuilder sb = new StringBuilder();
     sb.append(String.format("    public %s %s(){", formattedDataType, methodName));
@@ -480,6 +460,10 @@ private static String getDataType(int dt, int nullable) {
         if (dt == Types.TINYINT && nullable == 0)
             return "int";
         if (dt == Types.TINYINT && nullable == 1)
+            return "Integer";
+        if (dt == Types.SMALLINT && nullable == 0)
+            return "int";
+        if (dt == Types.SMALLINT && nullable == 1)
             return "Integer";
         if (dt == Types.DATE)
             return "Date";
