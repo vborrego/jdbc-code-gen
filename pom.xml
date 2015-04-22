@@ -43,4 +43,11 @@
     <version>4.11</version>
 </dependency>      
     </dependencies>
-  </project>
+
+  <scm>	
+    <url>https://github.com/vborrego/jdbc-code-gen </url>	  
+    <connection>scm:git:git://github.com/vborrego/jdbc-code-gen.git</connection>	
+    <!--<developerConnection>scm:git:git@github.com:kevinsawicki/github-maven-example.git</developerConnection> -->
+  </scm>
+
+</project>
